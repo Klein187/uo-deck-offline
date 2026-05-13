@@ -42,18 +42,29 @@ declare -rA EXPANSION_PORT=(
   [t2a]="2594"
 )
 
-readonly REQUIRED_DATA_FILES=(
-  "anim.mul" "anim.idx"
-  "map0.mul"
-  "staidx0.mul" "statics0.mul"
-  "tiledata.mul" "radarcol.mul" "hues.mul"
-  "art.mul" "artidx.mul"
-  "gumpart.mul" "gumpidx.mul"
-  "skills.mul" "skills.idx"
-  "sound.mul" "soundidx.mul"
+# Each entry is a group of equivalent filenames. The user's UO install needs
+# at least ONE file from each group. Modern UO clients use .uop archives
+# instead of the old .mul files; ClassicUO reads either.
+readonly DATA_FILE_GROUPS=(
+  "anim.mul|AnimationFrame1.uop|AnimationSequence.uop"
+  "anim.idx"
+  "map0.mul|map0LegacyMUL.uop"
+  "staidx0.mul"
+  "statics0.mul"
+  "tiledata.mul"
+  "radarcol.mul"
+  "hues.mul"
+  "art.mul|artLegacyMUL.uop"
+  "artidx.mul|artLegacyMUL.uop"
+  "gumpart.mul|gumpartLegacyMUL.uop"
+  "gumpidx.mul|gumpartLegacyMUL.uop"
+  "skills.mul"
+  "skills.idx"
+  "sound.mul|soundLegacyMUL.uop"
+  "soundidx.mul|soundLegacyMUL.uop"
   "speech.mul"
-  "multi.mul" "multi.idx"
-  "verdata.mul"
+  "multi.mul|MultiCollection.uop"
+  "multi.idx|MultiCollection.uop"
 )
 
 SELECTED=()
@@ -266,31 +277,51 @@ EOF
     [[ ! -d "$src" ]] && { warn "Not a directory: $src"; continue; }
 
     local missing=()
-    for f in "${REQUIRED_DATA_FILES[@]}"; do
-      if ! find "$src" -maxdepth 1 -iname "$f" -print -quit | grep -q .; then
-        missing+=("$f")
+    for group in "${DATA_FILE_GROUPS[@]}"; do
+      local found_any=0
+      # Each group is pipe-separated alternatives.
+      IFS='|' read -ra alternatives <<< "$group"
+      for alt in "${alternatives[@]}"; do
+        if find "$src" -maxdepth 1 -iname "$alt" -print -quit | grep -q .; then
+          found_any=1
+          break
+        fi
+      done
+      if (( ! found_any )); then
+        # Show the first alternative as the canonical name in error messages.
+        missing+=("${alternatives[0]}")
       fi
     done
 
     if (( ${#missing[@]} )); then
       warn "Missing required files in $src:"
       printf '       %s\n' "${missing[@]}"
+      echo "       (Modern UO clients use .uop archives instead of some .mul"
+      echo "        files. The installer accepts either, but at least one"
+      echo "        equivalent must exist.)"
       confirm "Try a different path?" || die "Cannot continue without UO data files."
       continue
     fi
-    ok "All required UO data files found in $src"
+    ok "All required UO data files (or modern equivalents) found in $src"
     break
   done
 
   info "Copying UO data files to ${UODATA_DIR}..."
   mkdir -p "${UODATA_DIR}"
-  for f in "${REQUIRED_DATA_FILES[@]}"; do
-    local found
-    found=$(find "$src" -maxdepth 1 -iname "$f" -print -quit)
-    [[ -n "$found" ]] && rsync -a "$found" "${UODATA_DIR}/${f}"
+  # Copy every matching alternative found so we get both .mul and .uop
+  # variants if both are present.
+  for group in "${DATA_FILE_GROUPS[@]}"; do
+    IFS='|' read -ra alternatives <<< "$group"
+    for alt in "${alternatives[@]}"; do
+      while IFS= read -r found; do
+        [[ -n "$found" ]] && rsync -a "$found" "${UODATA_DIR}/"
+      done < <(find "$src" -maxdepth 1 -iname "$alt")
+    done
   done
+  # Also pull anything else useful (cliloc, additional .uop, .mul, .idx)
   find "$src" -maxdepth 1 \( -iname "*.mul" -o -iname "*.uop" -o -iname "*.idx" -o -iname "cliloc.*" \) \
     -exec rsync -a {} "${UODATA_DIR}/" \;
+  # Normalize to lowercase for ServUO's Linux-side reads
   ( cd "${UODATA_DIR}" && for f in *; do
       lc="${f,,}"
       [[ "$f" != "$lc" ]] && mv -n "$f" "$lc"
