@@ -63,7 +63,7 @@ namespace Server.Mobiles
                 case BotTier.Expert:
                     return Utility.RandomList<BaseCreature>(
                         new GrizzlyBear(), new PolarBear(), new HellHound(),
-                        new DireWolf(), new Ostard(), new FrenziedOstard(),
+                        new DireWolf(), new DesertOstard(), new FrenziedOstard(),
                         new SnowLeopard(), new PredatorHellCat());
                 case BotTier.Grandmaster:
                     // 70% dragon-tier, 30% something else for variety.

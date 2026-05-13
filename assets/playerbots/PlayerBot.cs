@@ -183,7 +183,7 @@ namespace Server.Mobiles
             if (IsPK)
             {
                 this.Kills = 6;
-                this.AlwaysMurderer = true;
+                // AlwaysMurderer is overridden below; just ensure murderer state.
                 this.PKBrain = new PKBehavior(this);
             }
             else if (IsMacroer)
@@ -196,6 +196,7 @@ namespace Server.Mobiles
         public override bool ShowFameTitle => false;
         public override bool CanRummageCorpses => IsCombatRole || IsPK;
         public override bool AlwaysAttackable => IsPK;
+        public override bool AlwaysMurderer => IsPK;
 
         public override void OnThink()
         {

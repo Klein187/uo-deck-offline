@@ -106,7 +106,7 @@ namespace Server.Mobiles
             // Weapon scales with tier
             switch (b.Tier)
             {
-                case BotTier.Novice:      b.AddItem(new ShortSword()); break;
+                case BotTier.Novice:      b.AddItem(new Cutlass()); break;
                 case BotTier.Apprentice:  b.AddItem(new Longsword());  break;
                 case BotTier.Adept:       b.AddItem(new Katana());     break;
                 case BotTier.Expert:      b.AddItem(new Broadsword()); break;
@@ -427,7 +427,7 @@ namespace Server.Mobiles
                 case PKKind.Fencer:
                     b.SetSkill(SkillName.Fencing, pmin, pmax);
                     b.AddItem(Utility.RandomList<Item>(
-                        new Kryss(), new Dagger(), new ShortSpear()));
+                        new Kryss(), new Dagger(), new Spear()));
                     break;
                 case PKKind.Archer:
                     b.SetSkill(SkillName.Archery, pmin, pmax);

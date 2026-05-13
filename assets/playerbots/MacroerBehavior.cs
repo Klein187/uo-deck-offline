@@ -123,12 +123,12 @@ namespace Server.Mobiles
             {
                 var spell = new NightSightSpell(m_Owner, null);
                 spell.Cast();
-                Effects.SendTargetParticles(m_Owner, 0x375A, 1, 17, 1153, 7, 9919, 0);
+                Effects.SendTargetParticles(m_Owner, 0x375A, 1, 17, 1153, 7, 9919, (EffectLayer)255, 0);
                 m_Owner.PlaySound(0x1E3);
             }
             catch
             {
-                Effects.SendTargetParticles(m_Owner, 0x375A, 1, 17, 1153, 7, 9919, 0);
+                Effects.SendTargetParticles(m_Owner, 0x375A, 1, 17, 1153, 7, 9919, (EffectLayer)255, 0);
                 m_Owner.PlaySound(0x1E3);
             }
         }
@@ -187,7 +187,7 @@ namespace Server.Mobiles
                 case 2: m_Owner.Say("Stop"); break;
             }
             // Target sparkles on the creature
-            Effects.SendTargetParticles(wild, 0x375A, 1, 17, 1153, 7, 9919, 0);
+            Effects.SendTargetParticles(wild, 0x375A, 1, 17, 1153, 7, 9919, (EffectLayer)255, 0);
             // Use the bot's "use skill" animation
             m_Owner.Animate(33, 4, 1, true, false, 0);
             m_Owner.PlaySound(0x55F);  // skill use sound
