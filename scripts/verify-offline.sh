@@ -35,12 +35,23 @@ done
 
 echo
 echo "Checking UO data files..."
-for f in map0.mul tiledata.mul hues.mul anim.mul; do
-  if [[ -f "${INSTALL_ROOT}/uodata/${f}" ]]; then
-    ok "uodata/${f}"
-  else
-    fail "uodata/${f} missing"
-  fi
+# Each entry can be satisfied by any of several alternative filenames.
+declare -A uo_groups=(
+  ["map data"]="map0.mul map0legacymul.uop"
+  ["tile data"]="tiledata.mul"
+  ["hues"]="hues.mul"
+  ["animations"]="anim.mul animationframe1.uop"
+)
+for label in "${!uo_groups[@]}"; do
+  found=0
+  for alt in ${uo_groups[$label]}; do
+    if [[ -f "${INSTALL_ROOT}/uodata/${alt}" ]]; then
+      ok "${label}: ${alt}"
+      found=1
+      break
+    fi
+  done
+  (( ! found )) && fail "${label}: none of (${uo_groups[$label]}) found"
 done
 
 if [[ ! -f "${MANIFEST}" ]]; then

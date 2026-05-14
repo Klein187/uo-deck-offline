@@ -23,7 +23,7 @@ readonly LOG_FILE="${INSTALL_ROOT}/install.log"
 readonly SERVUO_REPO="https://github.com/ServUO/ServUO.git"
 readonly SERVUO_COMMIT="aa4c139"
 
-readonly CLASSICUO_RELEASE_URL="https://github.com/ClassicUO/ClassicUO/releases/latest/download/ClassicUO-dev-release-linux-x64.zip"
+readonly CLASSICUO_RELEASE_URL="https://github.com/ClassicUO/ClassicUO/releases/download/ClassicUO-dev-release/ClassicUOLauncher-linux-x64-release.zip"
 
 readonly DOTNET_INSTALL_URL="https://dot.net/v1/dotnet-install.sh"
 readonly DOTNET_CHANNEL="8.0"
@@ -265,7 +265,8 @@ installs — only need to be supplied once.
 We do NOT redistribute UO files. You must provide them yourself.
 
 EOF
-  if [[ -d "${UODATA_DIR}" ]] && [[ -f "${UODATA_DIR}/map0.mul" ]]; then
+  if [[ -d "${UODATA_DIR}" ]] && \
+     ( [[ -f "${UODATA_DIR}/map0.mul" ]] || [[ -f "${UODATA_DIR}/map0legacymul.uop" ]] ); then
     ok "UO data already present at ${UODATA_DIR}"
     confirm "Re-copy from a new source?" || return
   fi
@@ -309,23 +310,28 @@ EOF
   info "Copying UO data files to ${UODATA_DIR}..."
   mkdir -p "${UODATA_DIR}"
   # Copy every matching alternative found so we get both .mul and .uop
-  # variants if both are present.
+  # variants if both are present. Use || true so individual file copy
+  # errors (perms, weird filenames) don't kill the whole installer.
   for group in "${DATA_FILE_GROUPS[@]}"; do
     IFS='|' read -ra alternatives <<< "$group"
     for alt in "${alternatives[@]}"; do
       while IFS= read -r found; do
-        [[ -n "$found" ]] && rsync -a "$found" "${UODATA_DIR}/"
-      done < <(find "$src" -maxdepth 1 -iname "$alt")
+        [[ -n "$found" ]] && rsync -a "$found" "${UODATA_DIR}/" 2>/dev/null || true
+      done < <(find "$src" -maxdepth 1 -iname "$alt" 2>/dev/null)
     done
   done
-  # Also pull anything else useful (cliloc, additional .uop, .mul, .idx)
+  # Also pull anything else useful (cliloc, additional .uop, .mul, .idx).
+  # Tolerate per-file failures.
   find "$src" -maxdepth 1 \( -iname "*.mul" -o -iname "*.uop" -o -iname "*.idx" -o -iname "cliloc.*" \) \
-    -exec rsync -a {} "${UODATA_DIR}/" \;
-  # Normalize to lowercase for ServUO's Linux-side reads
+    -exec rsync -a {} "${UODATA_DIR}/" \; 2>/dev/null || true
+  # Normalize to lowercase for ServUO's Linux-side reads. Wrap in || true
+  # to survive any individual rename collision.
   ( cd "${UODATA_DIR}" && for f in *; do
       lc="${f,,}"
-      [[ "$f" != "$lc" ]] && mv -n "$f" "$lc"
-    done )
+      if [[ "$f" != "$lc" ]]; then
+        mv -n "$f" "$lc" 2>/dev/null || true
+      fi
+    done ) || true
   ok "UO data files copied."
 }
 
@@ -485,17 +491,58 @@ install_classicuo() {
 
   mkdir -p "${CLIENT_DIR}"
   local zip="${INSTALL_ROOT}/classicuo.zip"
-  info "Downloading ClassicUO..."
-  curl -fL --progress-bar "${CLASSICUO_RELEASE_URL}" -o "${zip}"
+
+  # ClassicUO's release asset names have changed multiple times. Rather than
+  # hardcoding a URL that may 404, we query the GitHub API for both the
+  # 'latest' release and the rolling 'ClassicUO-dev-release' pre-release tag,
+  # and pick the first asset that looks like a Linux x64 zip.
+  info "Looking up current ClassicUO Linux release asset..."
+  local url=""
+  for tag in "ClassicUO-dev-release" "ClassicUO-main-release" "latest"; do
+    local api
+    if [[ "$tag" == "latest" ]]; then
+      api="https://api.github.com/repos/ClassicUO/ClassicUO/releases/latest"
+    else
+      api="https://api.github.com/repos/ClassicUO/ClassicUO/releases/tags/${tag}"
+    fi
+    # Parse asset URLs; pick the first that contains "linux" (case-insensitive)
+    # and ends in .zip.
+    url=$(curl -fsSL "$api" 2>/dev/null \
+      | grep -oE '"browser_download_url"[[:space:]]*:[[:space:]]*"[^"]+"' \
+      | grep -iE 'linux.*\.zip"' \
+      | head -n1 \
+      | sed -E 's/.*"([^"]+)"$/\1/')
+    if [[ -n "$url" ]]; then
+      info "Found: $(basename "$url")  (release: $tag)"
+      break
+    fi
+  done
+
+  if [[ -z "$url" ]]; then
+    err "Could not find a ClassicUO Linux release asset on GitHub."
+    err "Manual fallback: download ClassicUOLauncher-linux-x64-release.zip"
+    err "from https://github.com/ClassicUO/ClassicUO/releases and place at"
+    err "${zip}, then re-run install.sh"
+    die "ClassicUO download failed."
+  fi
+
+  info "Downloading ClassicUO from ${url}..."
+  curl -fL --progress-bar "$url" -o "${zip}"
   info "Extracting..."
   unzip -q -o "${zip}" -d "${CLIENT_DIR}"
   rm -f "${zip}"
 
   local bin
-  bin=$(find "${CLIENT_DIR}" -maxdepth 3 -name "ClassicUO" -type f -executable -print -quit)
+  # Modern releases ship the launcher binary
+  bin=$(find "${CLIENT_DIR}" -maxdepth 3 -name "ClassicUOLauncher" -type f -print -quit)
+  # Fallback to older direct-client naming
+  [[ -z "$bin" ]] && bin=$(find "${CLIENT_DIR}" -maxdepth 3 -name "ClassicUO" -type f -executable -print -quit)
   [[ -z "$bin" ]] && bin=$(find "${CLIENT_DIR}" -maxdepth 3 -name "ClassicUO.bin.x86_64" -print -quit)
   [[ -z "$bin" ]] && die "Could not locate ClassicUO binary after extraction."
   chmod +x "$bin"
+  # Make the whole launcher tree executable — the launcher invokes other
+  # binaries inside its folder.
+  chmod -R u+rwX "${CLIENT_DIR}" 2>/dev/null || true
   ln -sf "$bin" "${CLIENT_DIR}/classicuo"
 
   ok "ClassicUO installed. (Settings written per-launch by start-uo.sh.)"

@@ -71,7 +71,7 @@ namespace Server.Mobiles
             }
         }
 
-        public static void Configure(PlayerBot bot, BotRole role)
+        public static void ConfigureRole(PlayerBot bot, BotRole role)
         {
             switch (role)
             {

@@ -24,6 +24,35 @@ if [[ -x "${DOTNET_DIR}/dotnet" ]]; then
   export DOTNET_ROOT="${DOTNET_DIR}"
 fi
 
+# Preflight: confirm Flatpak Mono runtime is available. ServUO Pub 57 is a
+# .NET Framework 4.8 build; we run it through the Mono binary that ships
+# inside the Freedesktop SDK Flatpak extension. We invoke the binary
+# *directly* (not via `flatpak run`) because Flatpak's network namespacing
+# would otherwise isolate the listening port from the host.
+if ! flatpak info org.freedesktop.Sdk.Extension.mono6//24.08 >/dev/null 2>&1; then
+  cat <<'EOF' >&2
+ERROR: Flatpak Mono runtime not found.
+
+ServUO needs Mono to run on Linux. Install it once:
+
+  flatpak install --user -y flathub org.freedesktop.Sdk//24.08
+  flatpak install --user -y flathub org.freedesktop.Sdk.Extension.mono6//24.08
+
+Then re-run this launcher.
+EOF
+  exit 1
+fi
+
+# Resolve the path to mono inside the Flatpak runtime. The hash component
+# changes when the extension is updated, so we ask flatpak for it.
+MONO_BASE=$(flatpak info --show-location org.freedesktop.Sdk.Extension.mono6//24.08 2>/dev/null)/files
+MONO_BIN="${MONO_BASE}/bin/mono"
+if [[ ! -x "${MONO_BIN}" ]]; then
+  echo "ERROR: Mono binary not found at ${MONO_BIN}" >&2
+  exit 1
+fi
+export LD_LIBRARY_PATH="${MONO_BASE}/lib:${LD_LIBRARY_PATH:-}"
+
 # --- Parse args ---
 FORCED_EXPANSION=""
 for arg in "$@"; do
@@ -121,10 +150,17 @@ if [[ -f "${PIDFILE}" ]] && kill -0 "$(cat "${PIDFILE}")" 2>/dev/null; then
 else
   echo "Starting ServUO..."
   pushd "${SERVUO_DIR}" >/dev/null
-  if [[ -f "Distribution/ServUO.dll" ]]; then
+
+  # ServUO Pub 57 is a .NET Framework 4.8 app — ServUO.exe must be run via
+  # Mono. We invoke the Mono binary directly (resolved above from the
+  # Flatpak runtime) rather than through `flatpak run`, because Flatpak's
+  # network sandbox would isolate the listening port from the host shell
+  # and ClassicUO would not be able to connect.
+  if [[ -f "ServUO.exe" ]]; then
+    nohup "${MONO_BIN}" ServUO.exe >"${SERVER_LOG}" 2>&1 &
+  elif [[ -f "Distribution/ServUO.dll" ]]; then
+    # Fallback: newer ServUO build that produced a .NET Core DLL
     nohup dotnet Distribution/ServUO.dll >"${SERVER_LOG}" 2>&1 &
-  elif [[ -f "ServUO.exe" ]]; then
-    nohup dotnet ServUO.exe >"${SERVER_LOG}" 2>&1 &
   else
     echo "ERROR: cannot locate built ServUO binary in ${SERVUO_DIR}" >&2
     exit 1
@@ -132,19 +168,48 @@ else
   echo $! > "${PIDFILE}"
   popd >/dev/null
 
-  echo "Waiting for server on 127.0.0.1:${PORT}..."
-  for i in $(seq 1 60); do
-    if (echo > "/dev/tcp/127.0.0.1/${PORT}") 2>/dev/null; then
+  echo "Waiting for server on 127.0.0.1:${PORT} (up to 120s for first boot)..."
+  server_up=0
+  for i in $(seq 1 120); do
+    # Try multiple ways to detect the port being listened on, in order of
+    # preference. ss is the modern tool; netstat is the classic; /dev/tcp
+    # is the bash builtin fallback.
+    if command -v ss >/dev/null 2>&1; then
+      if ss -ltn 2>/dev/null | grep -qE "[:.]${PORT}\\b"; then
+        server_up=1
+      fi
+    elif command -v netstat >/dev/null 2>&1; then
+      if netstat -ltn 2>/dev/null | grep -qE "[:.]${PORT}\\b"; then
+        server_up=1
+      fi
+    else
+      # bash /dev/tcp fallback
+      if exec 3<>"/dev/tcp/127.0.0.1/${PORT}" 2>/dev/null; then
+        server_up=1
+        exec 3<&- 3>&- 2>/dev/null || true
+      fi
+    fi
+
+    if (( server_up )); then
       echo "Server up after ${i}s."
       break
     fi
-    sleep 1
-    if (( i == 60 )); then
-      echo "Server did not start within 60s. See ${SERVER_LOG}" >&2
-      tail -n 40 "${SERVER_LOG}" >&2
+
+    # Sanity check: did the server crash during boot?
+    if ! kill -0 "$(cat "${PIDFILE}" 2>/dev/null)" 2>/dev/null; then
+      echo "Server process died during boot. Last 60 lines of log:" >&2
+      tail -n 60 "${SERVER_LOG}" >&2
       exit 1
     fi
+
+    sleep 1
   done
+
+  if (( ! server_up )); then
+    echo "Server did not start within 120s. See ${SERVER_LOG}" >&2
+    tail -n 40 "${SERVER_LOG}" >&2
+    exit 1
+  fi
 fi
 
 # --- Write ClassicUO settings.json for the chosen port ---
@@ -155,7 +220,7 @@ cat > "${CLIENT_DIR}/settings.json" <<EOF
   "ip": "127.0.0.1",
   "port": ${PORT},
   "ultimaonlinedirectory": "${INSTALL_ROOT}/uodata",
-  "clientversion": "3.0.8j",
+  "clientversion": "7.0.24.0",
   "lastservernum": 1,
   "lastserver": "UO Deck Offline — ${NAME}",
   "fps": 60,

@@ -174,7 +174,7 @@ namespace Server.Mobiles
             SetHits(40, 80); SetDamage(8, 14);
             SetDamageType(ResistanceType.Physical, 100);
 
-            PlayerBotRoles.Configure(this, role);
+            PlayerBotRoles.ConfigureRole(this, role);
 
             this.Fame = (IsCombatRole || IsPK) ? 1000 : 200;
             this.Karma = IsPK ? -5000 : Utility.RandomMinMax(-500, 1500);
