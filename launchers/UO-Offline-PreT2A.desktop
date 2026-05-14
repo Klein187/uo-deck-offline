@@ -1,9 +1,9 @@
 [Desktop Entry]
 Type=Application
-Name=UO Offline
+Name=UO Offline (Pre-T2A)
 GenericName=Ultima Online
-Comment=Ultima Online offline — pick expansion at launch
-Exec=@INSTALL_ROOT@/launch-gui.sh
+Comment=Ultima Online: Pre-T2A — offline with PlayerBots
+Exec=@INSTALL_ROOT@/launch-gui.sh pretoa
 Icon=applications-games
 Terminal=false
 Categories=Game;RolePlaying;
